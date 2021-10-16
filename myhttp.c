@@ -21,7 +21,7 @@ void execute_cgi(int client, const char *path, char *method, char *query_string)
 int my_getline(int sock, char *buf, int size);
 int startup(u_short port);
 
-
+// 处理http请求线程
 void accept_request(void *arg)
 {
     int client = (intptr_t)arg;
@@ -122,6 +122,7 @@ void bad_request(int client)
     printf("bad request%d", client);
 }
 
+// 复制文件内容并send
 void cat(int client, FILE *resource)
 {
     char buf[1024];
@@ -133,6 +134,7 @@ void cat(int client, FILE *resource)
     }
 }
 
+// 响应报文头
 void headers(int client)
 {
     char buf[1024];
@@ -145,6 +147,7 @@ void headers(int client)
     send(client, buf, strlen(buf), 0);
 }
 
+// 通过socket传输文件
 void server_file(int client,const char *path)
 {
     FILE *resource;
@@ -214,6 +217,7 @@ int my_getline(int sock, char *buf, int size)
     return i;
 }
 
+// 创建套接字
 int startup(u_short port)
 {
     int socketfd = 0;
