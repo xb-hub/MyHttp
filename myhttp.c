@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <sys/unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
@@ -172,9 +173,118 @@ void server_file(int client,const char *path)
     fclose(resource);
 }
 
+void cannot_execute(int client)
+{
+    printf("cannot execute! %d", client);
+}
+
 void execute_cgi(int client, const char *path, char *method, char *query_string)
 {
-    printf("%d %s %s %s", client, path, method, query_string);
+    int cgi_input[2];
+    int cgi_output[2];
+    pid_t pid;
+    int len = 1;
+    int content_length;
+    char buf[1024];
+    char c;
+    int status;
+    
+    if(strcasecmp(method, "GET") == 0)  // GET
+    {
+        while (len > 0 && strcmp(buf, "\n"))
+        {
+            len = my_getline(client, buf, sizeof(buf));
+        }
+    }
+    else if(strcasecmp(method, "POST")) //POST
+    {
+        len = my_getline(client, buf, sizeof(buf));
+        while (len > 0 && strcmp(buf, "\n"))
+        {
+            buf[15] = '\0';
+            if(strcasecmp(buf, "Content_Length:"))
+            {
+                content_length = atoi(&buf[16]);
+            }
+            len = my_getline(client, buf, sizeof(buf));
+        }
+        if(content_length == -1)
+        {
+            bad_request(client);
+            return;
+        }
+    }
+    else
+    {
+        printf("unknown method!\n");
+        return;
+    }
+    
+
+    if(pipe(cgi_input) < 0)
+    {
+        cannot_execute(client);
+        return;
+    }
+
+    if(pipe(cgi_output) < 0)
+    {
+        cannot_execute(client);
+        return;
+    }
+
+    if((pid = fork()) < 0)
+    {
+        cannot_execute(client);
+        return;
+    }
+
+    if(pid == 0)
+    {
+        char method_env[255];
+        char query_env[255];
+        char content_env[255];
+
+        dup2(cgi_output[1], STDOUT_FILENO);
+        dup2(cgi_input[0], STDIN_FILENO);
+        close(cgi_input[1]);
+        close(cgi_output[0]);
+
+        sprintf(method_env, "REQUEST_METHOD=%s", method);
+        putenv(method_env);
+
+        if(strcasecmp(method, "GET") == 0)
+        {
+            sprintf(query_env, "QUERY_STRING=%s", query_string);
+            putenv(query_env);
+        }
+        else if(strcasecmp(method, "POST") == 0)
+        {
+            sprintf(content_env, "CONTENT_LENGTH=%d", content_length);
+            putenv(content_env);
+        }
+        execl(path, NULL);
+        exit(0);
+    }
+    else if(pid > 0)
+    {
+        close(cgi_input[0]);
+        close(cgi_output[1]);
+
+        for(int i = 0; i < content_length; i++)
+        {
+            recv(client, &c, 1, 0);
+            write(cgi_input[1], &c, 1);
+        }
+
+        while (read(cgi_output[0], &c, 1) > 0)  // read要读取的fd文件中数据如果小于要读取的数据，会引起阻塞，所以一个字符一个字符读取。
+        {
+            send(client, buf, strlen(buf), 0);
+        }
+        close(cgi_input[1]);
+        close(cgi_output[0]);
+        waitpid(pid, &status, 0);
+    }
 }
 
 void error_die(const char *str)
